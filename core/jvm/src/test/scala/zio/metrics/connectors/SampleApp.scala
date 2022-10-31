@@ -45,7 +45,13 @@ object SampleApp extends ZIOAppDefault with InstrumentedSample {
 
   private lazy val insightAllKeysRouter =
     Http.collectZIO[Request] { case Method.GET -> !! / "insight" / "keys" =>
-      ZIO.serviceWithZIO[InsightPublisher](_.getAllKeys.map(_.toJson).map(Response.json))
+     ZIO.log(s"Returning metric keys to client") *>
+      ZIO.serviceWithZIO[InsightPublisher](_.getAllKeys.map(_.toJson).map(data => 
+        noCors(Response.json(data))
+      ))
+    }.catchAllDefect{ t => 
+      t.printStackTrace()
+      Http.fail(t)
     }
 
   // POST: /insight/metrics body Seq[MetricKey] => Seq[MetricsNotification]
@@ -66,11 +72,14 @@ object SampleApp extends ZIOAppDefault with InstrumentedSample {
                         ZIO
                           .serviceWithZIO[InsightPublisher](_.getMetrics(r.keys))
                           .map(_.toJson)
-                          .map(Response.json)
+                          .map(data => noCors(Response.json(data)))
                     }
       } yield response
-
     }
+
+  private val noCors = (resp : Response) => resp.updateHeaders(_.combine(
+    Headers("Access-Control-Allow-Origin", "*")
+  ))
 
   private val server =
     Server.port(bindPort) ++ Server.app(static ++ prometheusRouter ++ insightAllKeysRouter ++ insightGetMetricsRouter)
